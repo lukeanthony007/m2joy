@@ -13,9 +13,13 @@ use virtual_pad::VirtualPad;
 static QUIT: AtomicBool = AtomicBool::new(false);
 pub(crate) static TOGGLE: AtomicBool = AtomicBool::new(false);
 
-/// Base scale factor for mapping mouse velocity to stick deflection.
-/// Tuned so sensitivity=1.0 gives reasonable response at 800-1600 DPI.
-const BASE_SCALE: f32 = 5000.0;
+/// Scale factor mapping mouse velocity (sum of deltas over the window) to stick deflection.
+const BASE_SCALE: f32 = 400.0;
+
+/// Size of the sliding window in ticks (ms). At 125Hz mouse polling, ~8ms between
+/// reports, so 24ms captures ~3 reports for smooth interpolation without adding
+/// perceptible latency (well under one 60fps frame of 16.7ms extra).
+const WINDOW_SIZE: usize = 24;
 
 fn main() {
     // Handle "m2joy toggle" / "m2joy quit" before clap parsing.
@@ -44,7 +48,6 @@ fn main() {
     println!("  Sensitivity: {:.2}", config.sensitivity);
     println!("  Invert Y:    {}", config.invert_y);
     println!("  Output:      {} stick", if config.left_stick { "left" } else { "right" });
-    println!("  Decay:       {:.3}", config.decay);
     println!();
 
     signal_setup();
@@ -99,14 +102,26 @@ fn main() {
     println!("Configure RetroArch to use 'm2joy Stick' as a controller.");
     println!();
 
-    // Main 1kHz loop with leaky accumulator
+    // Main 1kHz loop with sliding window velocity
     let tick = Duration::from_micros(1000);
-    let decay = config.decay.clamp(0.5, 0.999);
     let scale = BASE_SCALE * config.sensitivity;
     let y_sign = if config.invert_y { -1.0f32 } else { 1.0 };
 
-    let mut accum_x: f32 = 0.0;
-    let mut accum_y: f32 = 0.0;
+    // Ring buffer: each slot holds (dx, dy) for one tick
+    let mut ring_x = [0i32; WINDOW_SIZE];
+    let mut ring_y = [0i32; WINDOW_SIZE];
+    let mut ring_pos: usize = 0;
+    let mut sum_x: i32 = 0;
+    let mut sum_y: i32 = 0;
+    let mut prev_sx: i32 = 0;
+    let mut prev_sy: i32 = 0;
+
+    // Debug
+    let debug = config.debug;
+    let mut dbg_tick: u32 = 0;
+    let mut dbg_raw_dx: i64 = 0;
+    let mut dbg_raw_dy: i64 = 0;
+    let mut dbg_samples: u32 = 0;
 
     loop {
         let tick_start = std::time::Instant::now();
@@ -118,29 +133,67 @@ fn main() {
         if mouse_state.active.load(Ordering::Relaxed) {
             let (dx, dy) = mouse_state.drain();
 
-            // Leaky accumulator: smooths mouse velocity into stick position
-            accum_x = accum_x * decay + dx as f32;
-            accum_y = accum_y * decay + dy as f32 * y_sign;
-
-            // Snap tiny residuals to zero
-            if accum_x.abs() < 0.01 {
-                accum_x = 0.0;
-            }
-            if accum_y.abs() < 0.01 {
-                accum_y = 0.0;
+            if debug {
+                dbg_raw_dx += dx as i64;
+                dbg_raw_dy += dy as i64;
+                if dx != 0 || dy != 0 {
+                    dbg_samples += 1;
+                }
             }
 
-            let sx = (accum_x * scale) as i32;
-            let sy = (accum_y * scale) as i32;
+            // Subtract the oldest sample, add the new one
+            sum_x -= ring_x[ring_pos];
+            sum_y -= ring_y[ring_pos];
+            ring_x[ring_pos] = dx;
+            ring_y[ring_pos] = dy;
+            sum_x += dx;
+            sum_y += dy;
+            ring_pos = (ring_pos + 1) % WINDOW_SIZE;
 
-            if let Err(e) = pad.emit_stick(sx, sy) {
-                log::warn!("Failed to emit stick: {}", e);
+            // Scale window sum directly to stick deflection
+            let sx = (sum_x as f32 * scale) as i32;
+            let sy = (sum_y as f32 * scale * y_sign) as i32;
+
+            // Only emit when values actually change
+            if sx != prev_sx || sy != prev_sy {
+                if let Err(e) = pad.emit_stick(sx, sy) {
+                    log::warn!("Failed to emit stick: {}", e);
+                }
+                prev_sx = sx;
+                prev_sy = sy;
+            }
+
+            // Debug: print every 100 ticks (100ms)
+            if debug {
+                dbg_tick += 1;
+                if dbg_tick >= 100 {
+                    if dbg_raw_dx != 0 || dbg_raw_dy != 0 || sum_x != 0 || sum_y != 0 {
+                        eprintln!(
+                            "[dbg] raw({:+5},{:+5}) n={:<3} win({:+5},{:+5}) out({:+6},{:+6})",
+                            dbg_raw_dx,
+                            dbg_raw_dy,
+                            dbg_samples,
+                            sum_x,
+                            sum_y,
+                            sx.clamp(-32767, 32767),
+                            sy.clamp(-32767, 32767),
+                        );
+                    }
+                    dbg_tick = 0;
+                    dbg_raw_dx = 0;
+                    dbg_raw_dy = 0;
+                    dbg_samples = 0;
+                }
             }
         } else {
-            // Not active — reset accumulator and center stick
-            if accum_x != 0.0 || accum_y != 0.0 {
-                accum_x = 0.0;
-                accum_y = 0.0;
+            // Not active — reset window and center stick
+            if prev_sx != 0 || prev_sy != 0 {
+                ring_x = [0; WINDOW_SIZE];
+                ring_y = [0; WINDOW_SIZE];
+                sum_x = 0;
+                sum_y = 0;
+                prev_sx = 0;
+                prev_sy = 0;
                 let _ = pad.emit_stick(0, 0);
             }
         }

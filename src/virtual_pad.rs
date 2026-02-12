@@ -13,7 +13,7 @@ pub struct VirtualPad {
 impl VirtualPad {
     pub fn new(use_left_stick: bool) -> std::io::Result<Self> {
         let abs = |axis: AbsoluteAxisType| -> UinputAbsSetup {
-            UinputAbsSetup::new(axis, AbsInfo::new(0, STICK_MIN, STICK_MAX, 16, 128, 1))
+            UinputAbsSetup::new(axis, AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 1))
         };
 
         // Declare a few buttons so RetroArch classifies this as a gamepad
