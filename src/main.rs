@@ -14,7 +14,7 @@ static QUIT: AtomicBool = AtomicBool::new(false);
 pub(crate) static TOGGLE: AtomicBool = AtomicBool::new(false);
 
 /// Scale factor mapping mouse velocity (sum of deltas over the window) to stick deflection.
-const BASE_SCALE: f32 = 400.0;
+const BASE_SCALE: f32 = 700.0;
 
 /// Size of the sliding window in ticks (ms). At 125Hz mouse polling, ~8ms between
 /// reports, so 24ms captures ~3 reports for smooth interpolation without adding
