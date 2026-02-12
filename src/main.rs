@@ -13,13 +13,13 @@ use virtual_pad::VirtualPad;
 static QUIT: AtomicBool = AtomicBool::new(false);
 pub(crate) static TOGGLE: AtomicBool = AtomicBool::new(false);
 
-/// Scale factor mapping mouse velocity (sum of deltas over the window) to stick deflection.
-const BASE_SCALE: f32 = 700.0;
+/// Scale factor for stick deflection.
+const BASE_SCALE: f32 = 2400.0;
 
-/// Size of the sliding window in ticks (ms). At 125Hz mouse polling, ~8ms between
-/// reports, so 24ms captures ~3 reports for smooth interpolation without adding
-/// perceptible latency (well under one 60fps frame of 16.7ms extra).
-const WINDOW_SIZE: usize = 24;
+/// EMA decay per tick (1ms). Controls how long the stick holds its value between
+/// mouse reports. 0.96 ≈ 25ms half-life — holds through one 60fps frame, then
+/// fades smoothly. No sharp edges like a sliding window.
+const EMA_DECAY: f32 = 0.96;
 
 fn main() {
     // Handle "m2joy toggle" / "m2joy quit" before clap parsing.
@@ -102,17 +102,16 @@ fn main() {
     println!("Configure RetroArch to use 'm2joy Stick' as a controller.");
     println!();
 
-    // Main 1kHz loop with sliding window velocity
+    // Main 1kHz loop — EMA smoothed velocity
+    // New deltas are added at full strength (instant response). Between mouse reports,
+    // the EMA decays smoothly so the stick value persists long enough for RetroArch's
+    // per-frame polling (~16ms) to always see meaningful deflection.
     let tick = Duration::from_micros(1000);
     let scale = BASE_SCALE * config.sensitivity;
     let y_sign = if config.invert_y { -1.0f32 } else { 1.0 };
 
-    // Ring buffer: each slot holds (dx, dy) for one tick
-    let mut ring_x = [0i32; WINDOW_SIZE];
-    let mut ring_y = [0i32; WINDOW_SIZE];
-    let mut ring_pos: usize = 0;
-    let mut sum_x: i32 = 0;
-    let mut sum_y: i32 = 0;
+    let mut ema_x: f32 = 0.0;
+    let mut ema_y: f32 = 0.0;
     let mut prev_sx: i32 = 0;
     let mut prev_sy: i32 = 0;
 
@@ -141,18 +140,18 @@ fn main() {
                 }
             }
 
-            // Subtract the oldest sample, add the new one
-            sum_x -= ring_x[ring_pos];
-            sum_y -= ring_y[ring_pos];
-            ring_x[ring_pos] = dx;
-            ring_y[ring_pos] = dy;
-            sum_x += dx;
-            sum_y += dy;
-            ring_pos = (ring_pos + 1) % WINDOW_SIZE;
+            // EMA: decay old value, add new delta at full weight.
+            // When mouse reports arrive (~every 8ms), the delta replaces the decayed
+            // residual. Between reports (dx=0), the value smoothly fades toward zero.
+            ema_x = ema_x * EMA_DECAY + dx as f32;
+            ema_y = ema_y * EMA_DECAY + dy as f32 * y_sign;
 
-            // Scale window sum directly to stick deflection
-            let sx = (sum_x as f32 * scale) as i32;
-            let sy = (sum_y as f32 * scale * y_sign) as i32;
+            // Snap to zero when tiny to avoid endless near-zero drift
+            if ema_x.abs() < 0.5 { ema_x = 0.0; }
+            if ema_y.abs() < 0.5 { ema_y = 0.0; }
+
+            let sx = (ema_x * scale) as i32;
+            let sy = (ema_y * scale) as i32;
 
             // Only emit when values actually change
             if sx != prev_sx || sy != prev_sy {
@@ -167,14 +166,14 @@ fn main() {
             if debug {
                 dbg_tick += 1;
                 if dbg_tick >= 100 {
-                    if dbg_raw_dx != 0 || dbg_raw_dy != 0 || sum_x != 0 || sum_y != 0 {
+                    if dbg_raw_dx != 0 || dbg_raw_dy != 0 || ema_x != 0.0 || ema_y != 0.0 {
                         eprintln!(
-                            "[dbg] raw({:+5},{:+5}) n={:<3} win({:+5},{:+5}) out({:+6},{:+6})",
+                            "[dbg] raw({:+5},{:+5}) n={:<3} ema({:+7.1},{:+7.1}) out({:+6},{:+6})",
                             dbg_raw_dx,
                             dbg_raw_dy,
                             dbg_samples,
-                            sum_x,
-                            sum_y,
+                            ema_x,
+                            ema_y,
                             sx.clamp(-32767, 32767),
                             sy.clamp(-32767, 32767),
                         );
@@ -186,12 +185,10 @@ fn main() {
                 }
             }
         } else {
-            // Not active — reset window and center stick
-            if prev_sx != 0 || prev_sy != 0 {
-                ring_x = [0; WINDOW_SIZE];
-                ring_y = [0; WINDOW_SIZE];
-                sum_x = 0;
-                sum_y = 0;
+            // Not active — center stick
+            if ema_x != 0.0 || ema_y != 0.0 || prev_sx != 0 || prev_sy != 0 {
+                ema_x = 0.0;
+                ema_y = 0.0;
                 prev_sx = 0;
                 prev_sy = 0;
                 let _ = pad.emit_stick(0, 0);
