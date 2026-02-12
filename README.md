@@ -1,6 +1,6 @@
 ## Description
 
-A Linux mouse-to-joystick injector for RetroArch that grabs your mouse via evdev and maps it to a virtual gamepad stick via uinput. Works with any game on any core, on Wayland or X11.
+Linux mouse-to-joystick injector for RetroArch that grabs your mouse via evdev and maps it to a virtual gamepad stick via uinput. Works with any game on any core, on Wayland or X11.
 
 ## Skills / Tools / Stack
 

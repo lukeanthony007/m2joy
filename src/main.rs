@@ -14,13 +14,15 @@ static QUIT: AtomicBool = AtomicBool::new(false);
 pub(crate) static TOGGLE: AtomicBool = AtomicBool::new(false);
 
 /// Scale factor for stick deflection.
-const BASE_SCALE: f32 = 3200.0;
+/// With EMA_DECAY=0.98, steady-state gain ≈ 1/(1-0.98) = 50.
+/// A typical slow mouse delta of ~2/report → EMA ≈ 5-8 → output ≈ 2500-4000.
+/// A fast flick of ~20/report → EMA ≈ 40-60 → output ≈ 20000-32767.
+const BASE_SCALE: f32 = 500.0;
 
-/// EMA decay per tick (1ms). 0.99 ≈ 69ms half-life. High decay means:
-/// - Less sawtooth between mouse reports (only decays to 0.99^8 ≈ 0.92 between 125Hz reports)
-/// - Steady value during constant movement
-/// - Needs higher BASE_SCALE to compensate for the higher decay absorbing less of each delta
-const EMA_DECAY: f32 = 0.99;
+/// EMA decay per tick (1ms). 0.98 ≈ 34ms half-life.
+/// Between 125Hz mouse reports (~8ms), decays to 0.98^8 ≈ 0.85 — moderate hold.
+/// High enough to smooth between reports, low enough to not accumulate wildly.
+const EMA_DECAY: f32 = 0.98;
 
 fn main() {
     // Handle "m2joy toggle" / "m2joy quit" before clap parsing.
