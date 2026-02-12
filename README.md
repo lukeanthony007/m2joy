@@ -1,41 +1,63 @@
-# m2joy
+## Description
 
-Linux mouse-to-joystick injector for RetroArch. Grabs your mouse via evdev and maps it to a virtual gamepad stick via uinput. Works with any game on any core, on Wayland or X11.
+A Linux mouse-to-joystick injector for RetroArch that grabs your mouse via evdev and maps it to a virtual gamepad stick via uinput. Works with any game on any core, on Wayland or X11.
 
-## How it works
+## Skills / Tools / Stack
 
-1. Reads raw mouse input from `/dev/input/eventX`
-2. Creates a virtual gamepad ("m2joy Stick") via `/dev/uinput`
-3. Converts mouse velocity to analog stick deflection at 1kHz using a leaky accumulator
-4. Toggle with `m2joy toggle` to grab/ungrab, quit with `m2joy quit`
+- Rust
+- Linux evdev / uinput
+- Unix signals (SIGUSR1)
+- clap CLI framework
 
-## Build
+# Summary
+
+m2joy reads raw mouse input from `/dev/input/eventX`, creates a virtual gamepad ("m2joy Stick") via `/dev/uinput`, and converts mouse velocity to analog stick deflection at 1kHz using a leaky accumulator.
+
+Control is fully command-based. Run `m2joy toggle` from another process to grab or ungrab the mouse—designed for Hyprland, sway, or any window manager keybind. Under the hood, toggle sends a SIGUSR1 signal to the running instance. No keyboard device access required.
+
+The decay parameter controls how quickly the stick returns to center after you stop moving. Lower values feel snappy, higher values feel smooth. Sensitivity scales the raw mouse input before it hits the accumulator.
+
+## Features
+
+- 1kHz polling loop with leaky accumulator for smooth analog stick output
+- Virtual gamepad via uinput recognized by RetroArch as a standard controller
+- Command-based toggle with `m2joy toggle` and `m2joy quit`
+- SIGUSR1 signal toggle for window manager keybind integration
+- Auto-detection of mouse device from `/dev/input/event*`
+- Configurable sensitivity, decay, Y-axis inversion, and stick output
+- Left or right stick output selection
+- Evdev grab/ungrab to capture and release the mouse
+
+### Roadmap
+
+1. Add per-game config profiles
+2. Implement mouse button to gamepad button mapping
+3. Build acceleration curves for non-linear sensitivity
+4. Add support for multiple mice
+5. Create a status indicator via desktop notification
+
+### Instructions
+
+1. Add yourself to the input group with `sudo usermod -aG input $USER` and re-login
+2. Ensure uinput is loaded with `sudo modprobe uinput`
+3. Build with `cargo build --release`
+4. Run `./target/release/m2joy` to start the daemon
+5. Toggle grab with `m2joy toggle` from another terminal or keybind
+6. In RetroArch go to Settings > Input > Port 1 Controls > Device Index and select m2joy Stick
+
+#### Hyprland
 
 ```
-cargo build --release
+bind = SUPER, F9, exec, m2joy toggle
 ```
 
-Binary is at `target/release/m2joy`.
-
-## Permissions
-
-You need access to evdev and uinput devices:
+#### sway / i3
 
 ```
-sudo usermod -aG input $USER
+bindsym $mod+F9 exec m2joy toggle
 ```
 
-Then log out and back in. If `/dev/uinput` doesn't exist:
-
-```
-sudo modprobe uinput
-```
-
-## Usage
-
-```
-m2joy [OPTIONS]
-```
+#### Options
 
 | Option | Default | Description |
 |---|---|---|
@@ -45,67 +67,6 @@ m2joy [OPTIONS]
 | `--left-stick` | off | Output to left stick instead of right |
 | `--decay` | 0.95 | Smoothing factor (0.90=snappy, 0.99=smooth) |
 
-### Examples
+### License
 
-```bash
-# Default — right stick, sensitivity 1.0
-m2joy
-
-# Double sensitivity, inverted Y
-m2joy -s 2.0 --invert-y
-
-# Output to left stick (for games that use left analog for aiming)
-m2joy --left-stick
-
-# Smoother output (slightly more latency)
-m2joy --decay 0.98
-
-# Specific mouse device
-m2joy -d /dev/input/event5
-```
-
-## Remote control
-
-While m2joy is running, you can control it from another terminal or a window manager keybind:
-
-```bash
-m2joy toggle   # grab/ungrab the mouse
-m2joy quit     # shut down cleanly
-```
-
-### Hyprland
-
-Add to `~/.config/hypr/hyprland.conf`:
-
-```
-bind = SUPER, F9, exec, m2joy toggle
-```
-
-### sway / i3
-
-```
-bindsym $mod+F9 exec m2joy toggle
-```
-
-## RetroArch setup
-
-1. Launch `m2joy`, then launch RetroArch
-2. Go to **Settings > Input > Port 1 Controls > Device Index**
-3. Select **m2joy Stick** from the device list (not Device Type — that's for the emulated controller)
-4. Map the stick axes to whatever your game uses for camera/aiming:
-   - **N64 FPS games**: map right stick to C-buttons
-   - **PS1/PS2/GameCube**: right stick usually maps directly
-   - **SNES/Genesis**: use left stick mode (`--left-stick`)
-
-You only need to configure this once per core — RetroArch saves per-core input remaps.
-
-## Tuning
-
-The `--decay` parameter controls how the leaky accumulator converts mouse velocity to stick position:
-
-- **Lower values (0.90)**: snappy, stick returns to center quickly when you stop moving. Can feel jittery at low DPI.
-- **Higher values (0.98-0.99)**: smoother output, but the stick takes longer to return to center after you stop moving (~100-200ms).
-- **Default (0.95)**: ~60ms return to center. Good starting point.
-
-If aiming feels too slow or too fast, adjust `--sensitivity` first. If it feels jittery or laggy, adjust `--decay`.
-
+MIT

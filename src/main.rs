@@ -14,12 +14,13 @@ static QUIT: AtomicBool = AtomicBool::new(false);
 pub(crate) static TOGGLE: AtomicBool = AtomicBool::new(false);
 
 /// Scale factor for stick deflection.
-const BASE_SCALE: f32 = 2400.0;
+const BASE_SCALE: f32 = 3200.0;
 
-/// EMA decay per tick (1ms). Controls how long the stick holds its value between
-/// mouse reports. 0.96 ≈ 25ms half-life — holds through one 60fps frame, then
-/// fades smoothly. No sharp edges like a sliding window.
-const EMA_DECAY: f32 = 0.96;
+/// EMA decay per tick (1ms). 0.99 ≈ 69ms half-life. High decay means:
+/// - Less sawtooth between mouse reports (only decays to 0.99^8 ≈ 0.92 between 125Hz reports)
+/// - Steady value during constant movement
+/// - Needs higher BASE_SCALE to compensate for the higher decay absorbing less of each delta
+const EMA_DECAY: f32 = 0.99;
 
 fn main() {
     // Handle "m2joy toggle" / "m2joy quit" before clap parsing.
@@ -112,6 +113,7 @@ fn main() {
 
     let mut ema_x: f32 = 0.0;
     let mut ema_y: f32 = 0.0;
+    let mut idle_ticks: u32 = 0;
     let mut prev_sx: i32 = 0;
     let mut prev_sy: i32 = 0;
 
@@ -140,15 +142,24 @@ fn main() {
                 }
             }
 
-            // EMA: decay old value, add new delta at full weight.
-            // When mouse reports arrive (~every 8ms), the delta replaces the decayed
-            // residual. Between reports (dx=0), the value smoothly fades toward zero.
+            // EMA with high decay (0.99): between 125Hz mouse reports the value
+            // only decays to 92% — much less sawtooth than 0.96 (which hit 72%).
+            // Steady movement produces a stable plateau.
             ema_x = ema_x * EMA_DECAY + dx as f32;
             ema_y = ema_y * EMA_DECAY + dy as f32 * y_sign;
 
-            // Snap to zero when tiny to avoid endless near-zero drift
-            if ema_x.abs() < 0.5 { ema_x = 0.0; }
-            if ema_y.abs() < 0.5 { ema_y = 0.0; }
+            // Track idle time to force quick stop when mouse stops
+            if dx == 0 && dy == 0 {
+                idle_ticks += 1;
+            } else {
+                idle_ticks = 0;
+            }
+
+            // After 30ms of no mouse data, force zero (kills the long decay tail)
+            if idle_ticks > 30 {
+                ema_x = 0.0;
+                ema_y = 0.0;
+            }
 
             let sx = (ema_x * scale) as i32;
             let sy = (ema_y * scale) as i32;
@@ -189,6 +200,7 @@ fn main() {
             if ema_x != 0.0 || ema_y != 0.0 || prev_sx != 0 || prev_sy != 0 {
                 ema_x = 0.0;
                 ema_y = 0.0;
+                idle_ticks = 0;
                 prev_sx = 0;
                 prev_sy = 0;
                 let _ = pad.emit_stick(0, 0);
