@@ -82,6 +82,8 @@ fn main() {
         }
     };
 
+    install_retroarch_autoconfig();
+
     // Spawn mouse reader thread
     let mouse_state = Arc::new(MouseState::new());
     let mouse_state_clone = Arc::clone(&mouse_state);
@@ -175,6 +177,19 @@ fn main() {
                 prev_sy = sy;
             }
 
+            // Forward mouse buttons as triggers: left click → R2, right click → L2
+            if mouse_state
+                .btns_dirty
+                .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                let l2 = mouse_state.btn_right.load(Ordering::Relaxed);
+                let r2 = mouse_state.btn_left.load(Ordering::Relaxed);
+                if let Err(e) = pad.emit_triggers(l2, r2) {
+                    log::warn!("Failed to emit triggers: {}", e);
+                }
+            }
+
             // Debug: print every 100 ticks (100ms)
             if debug {
                 dbg_tick += 1;
@@ -261,6 +276,64 @@ fn find_running_instance() -> Option<i32> {
         }
     }
     None
+}
+
+/// Install RetroArch autoconfig so the virtual gamepad is recognized automatically.
+/// Only writes if the RetroArch autoconfig/udev directory exists.
+fn install_retroarch_autoconfig() {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+    let dir = std::path::PathBuf::from(&home).join(".config/retroarch/autoconfig/udev");
+    if !dir.is_dir() {
+        return;
+    }
+    let path = dir.join("m2joy Stick.cfg");
+    if path.exists() {
+        return;
+    }
+    // Axis indices are contiguous in RetroArch's udev driver:
+    // ABS_X→0, ABS_Y→1, ABS_RX→2, ABS_RY→3 (no ABS_Z gap)
+    let cfg = "\
+input_driver = \"udev\"
+input_device = \"m2joy Stick\"
+input_device_display_name = \"m2joy Stick\"
+input_vendor_id = \"4660\"
+input_product_id = \"22136\"
+input_b_btn = \"0\"
+input_a_btn = \"1\"
+input_x_btn = \"2\"
+input_y_btn = \"3\"
+input_l2_btn = \"4\"
+input_r2_btn = \"5\"
+input_l_x_plus_axis = \"+0\"
+input_l_x_minus_axis = \"-0\"
+input_l_y_plus_axis = \"+1\"
+input_l_y_minus_axis = \"-1\"
+input_r_x_plus_axis = \"+2\"
+input_r_x_minus_axis = \"-2\"
+input_r_y_plus_axis = \"+3\"
+input_r_y_minus_axis = \"-3\"
+input_b_btn_label = \"A\"
+input_a_btn_label = \"B\"
+input_x_btn_label = \"X\"
+input_y_btn_label = \"Y\"
+input_l2_btn_label = \"L2 (Right Click)\"
+input_r2_btn_label = \"R2 (Left Click)\"
+input_l_x_plus_axis_label = \"Left Analog Right\"
+input_l_x_minus_axis_label = \"Left Analog Left\"
+input_l_y_plus_axis_label = \"Left Analog Down\"
+input_l_y_minus_axis_label = \"Left Analog Up\"
+input_r_x_plus_axis_label = \"Right Analog Right\"
+input_r_x_minus_axis_label = \"Right Analog Left\"
+input_r_y_plus_axis_label = \"Right Analog Down\"
+input_r_y_minus_axis_label = \"Right Analog Up\"
+";
+    match std::fs::write(&path, cfg) {
+        Ok(_) => log::info!("Installed RetroArch autoconfig: {}", path.display()),
+        Err(e) => log::warn!("Could not write RetroArch autoconfig: {}", e),
+    }
 }
 
 /// Send a signal to the running m2joy instance, or exit with an error.

@@ -16,12 +16,13 @@ impl VirtualPad {
             UinputAbsSetup::new(axis, AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 1))
         };
 
-        // Declare a few buttons so RetroArch classifies this as a gamepad
         let mut keys = AttributeSet::<Key>::new();
         keys.insert(Key::BTN_SOUTH);
         keys.insert(Key::BTN_EAST);
         keys.insert(Key::BTN_NORTH);
         keys.insert(Key::BTN_WEST);
+        keys.insert(Key::BTN_TL2);
+        keys.insert(Key::BTN_TR2);
 
         let device = VirtualDeviceBuilder::new()?
             .name("m2joy Stick")
@@ -57,6 +58,15 @@ impl VirtualPad {
         self.device.emit(&[
             evdev::InputEvent::new_now(evdev::EventType::ABSOLUTE, self.axis_x.0, x),
             evdev::InputEvent::new_now(evdev::EventType::ABSOLUTE, self.axis_y.0, y),
+            evdev::InputEvent::new_now(evdev::EventType::SYNCHRONIZATION, 0, 0),
+        ])
+    }
+
+    /// Emit L2/R2 trigger button state.
+    pub fn emit_triggers(&mut self, l2: bool, r2: bool) -> std::io::Result<()> {
+        self.device.emit(&[
+            evdev::InputEvent::new_now(evdev::EventType::KEY, Key::BTN_TL2.code(), l2 as i32),
+            evdev::InputEvent::new_now(evdev::EventType::KEY, Key::BTN_TR2.code(), r2 as i32),
             evdev::InputEvent::new_now(evdev::EventType::SYNCHRONIZATION, 0, 0),
         ])
     }

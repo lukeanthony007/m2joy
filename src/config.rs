@@ -21,11 +21,7 @@ pub struct Config {
     #[arg(long, default_value_t = false)]
     pub left_stick: bool,
 
-    /// Smoothing decay factor per ms (0.90-0.99, higher = smoother but laggier)
-    #[arg(long, default_value_t = 0.95)]
-    pub decay: f32,
-
-    /// Print debug diagnostics every 100ms (raw deltas, accumulator, output)
+    /// Print debug diagnostics every 100ms (raw deltas, EMA, output)
     #[arg(long, default_value_t = false)]
     pub debug: bool,
 }

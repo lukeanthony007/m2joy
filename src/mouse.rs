@@ -1,4 +1,4 @@
-use evdev::{Device, InputEventKind, RelativeAxisType};
+use evdev::{Device, InputEventKind, Key, RelativeAxisType};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
@@ -8,6 +8,9 @@ pub struct MouseState {
     pub dy: AtomicI32,
     pub active: AtomicBool,
     pub quit: AtomicBool,
+    pub btn_left: AtomicBool,
+    pub btn_right: AtomicBool,
+    pub btns_dirty: AtomicBool,
 }
 
 impl MouseState {
@@ -17,6 +20,9 @@ impl MouseState {
             dy: AtomicI32::new(0),
             active: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            btn_left: AtomicBool::new(false),
+            btn_right: AtomicBool::new(false),
+            btns_dirty: AtomicBool::new(false),
         }
     }
 
@@ -123,11 +129,11 @@ impl MouseReader {
             };
 
             for ev in &events {
-                if let InputEventKind::RelAxis(axis) = ev.kind() {
-                    if !self.state.active.load(Ordering::Relaxed) {
-                        continue;
-                    }
-                    match axis {
+                if !self.state.active.load(Ordering::Relaxed) {
+                    continue;
+                }
+                match ev.kind() {
+                    InputEventKind::RelAxis(axis) => match axis {
                         RelativeAxisType::REL_X => {
                             self.state.dx.fetch_add(ev.value(), Ordering::Relaxed);
                         }
@@ -135,7 +141,22 @@ impl MouseReader {
                             self.state.dy.fetch_add(ev.value(), Ordering::Relaxed);
                         }
                         _ => {}
+                    },
+                    InputEventKind::Key(key) => {
+                        let pressed = ev.value() != 0;
+                        match key {
+                            Key::BTN_LEFT => {
+                                self.state.btn_left.store(pressed, Ordering::Relaxed);
+                                self.state.btns_dirty.store(true, Ordering::Relaxed);
+                            }
+                            Key::BTN_RIGHT => {
+                                self.state.btn_right.store(pressed, Ordering::Relaxed);
+                                self.state.btns_dirty.store(true, Ordering::Relaxed);
+                            }
+                            _ => {}
+                        }
                     }
+                    _ => {}
                 }
             }
         }

@@ -11,30 +11,30 @@ Linux mouse-to-joystick injector for RetroArch that grabs your mouse via evdev a
 
 # Summary
 
-m2joy reads raw mouse input from `/dev/input/eventX`, creates a virtual gamepad ("m2joy Stick") via `/dev/uinput`, and converts mouse velocity to analog stick deflection at 1kHz using a leaky accumulator.
+m2joy reads raw mouse input from `/dev/input/eventX`, creates a virtual gamepad ("m2joy Stick") via `/dev/uinput`, and converts mouse velocity to analog stick deflection at 1kHz using an exponential moving average.
 
 Control is fully command-based. Run `m2joy toggle` from another process to grab or ungrab the mouse—designed for Hyprland, sway, or any window manager keybind. Under the hood, toggle sends a SIGUSR1 signal to the running instance. No keyboard device access required.
 
-The decay parameter controls how quickly the stick returns to center after you stop moving. Lower values feel snappy, higher values feel smooth. Sensitivity scales the raw mouse input before it hits the accumulator.
+Mouse buttons are forwarded as gamepad triggers: left click maps to R2 (shoot) and right click maps to L2 (aim). RetroArch autoconfig is installed on first run so the virtual gamepad is recognized automatically.
 
 ## Features
 
-- 1kHz polling loop with leaky accumulator for smooth analog stick output
-- Virtual gamepad via uinput recognized by RetroArch as a standard controller
+- 1kHz polling loop with EMA smoothing for stable analog stick output
+- Mouse buttons forwarded as gamepad triggers (left click → R2, right click → L2)
+- Virtual gamepad via uinput with automatic RetroArch autoconfig installation
 - Command-based toggle with `m2joy toggle` and `m2joy quit`
 - SIGUSR1 signal toggle for window manager keybind integration
 - Auto-detection of mouse device from `/dev/input/event*`
-- Configurable sensitivity, decay, Y-axis inversion, and stick output
+- Configurable sensitivity, Y-axis inversion, and stick output
 - Left or right stick output selection
 - Evdev grab/ungrab to capture and release the mouse
 
 ### Roadmap
 
 1. Add per-game config profiles
-2. Implement mouse button to gamepad button mapping
-3. Build acceleration curves for non-linear sensitivity
-4. Add support for multiple mice
-5. Create a status indicator via desktop notification
+2. Build acceleration curves for non-linear sensitivity
+3. Add support for multiple mice
+4. Create a status indicator via desktop notification
 
 ### Instructions
 
@@ -65,7 +65,7 @@ bindsym $mod+F9 exec m2joy toggle
 | `--invert-y` | off | Invert Y axis |
 | `-d, --device` | auto | Specific evdev path (e.g. `/dev/input/event5`) |
 | `--left-stick` | off | Output to left stick instead of right |
-| `--decay` | 0.95 | Smoothing factor (0.90=snappy, 0.99=smooth) |
+| `--debug` | off | Print diagnostics every 100ms |
 
 ### License
 
